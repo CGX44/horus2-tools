@@ -9,12 +9,75 @@ from flask import Flask, render_template_string, request, jsonify
 import yt_dlp
 import re
 import os
+import json
+from pathlib import Path
 from openai import OpenAI
 
 app = Flask(__name__)
 
 # Initialize OpenAI client
 openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+
+# Saved prompts file path
+PROMPTS_FILE = Path('/opt/youtube-transcript/saved_prompts.json')
+
+# Default prompts
+DEFAULT_PROMPTS = [
+    {
+        "id": 1,
+        "name": "Summarize Key Points",
+        "prompt": "Summarize the key points of this video in 3-5 bullet points."
+    },
+    {
+        "id": 2,
+        "name": "Extract Main Topics",
+        "prompt": "List the main topics and subtopics discussed in this video."
+    },
+    {
+        "id": 3,
+        "name": "Create Study Notes",
+        "prompt": "Create comprehensive study notes from this video transcript, organizing the information by topic."
+    },
+    {
+        "id": 4,
+        "name": "Extract Statistics",
+        "prompt": "Extract all statistics, data points, and numerical information mentioned in this video."
+    },
+    {
+        "id": 5,
+        "name": "LinkedIn Post",
+        "prompt": "Write an engaging LinkedIn post about this video that highlights the key insights."
+    }
+]
+
+def load_prompts():
+    """Load saved prompts from file or create default prompts"""
+    if not PROMPTS_FILE.exists():
+        save_prompts(DEFAULT_PROMPTS)
+        return DEFAULT_PROMPTS
+    
+    try:
+        with open(PROMPTS_FILE, 'r') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"Error loading prompts: {e}")
+        return DEFAULT_PROMPTS
+
+def save_prompts(prompts):
+    """Save prompts to file"""
+    try:
+        with open(PROMPTS_FILE, 'w') as f:
+            json.dump(prompts, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving prompts: {e}")
+        return False
+
+def get_next_prompt_id(prompts):
+    """Get next available prompt ID"""
+    if not prompts:
+        return 1
+    return max(p['id'] for p in prompts) + 1
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -289,6 +352,194 @@ HTML_TEMPLATE = """
             user-select: none;
         }
         
+        .prompt-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        
+        .prompt-selector select {
+            flex: 1;
+            padding: 10px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        
+        .prompt-selector select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .btn-icon {
+            padding: 10px 15px;
+            font-size: 16px;
+            background: #f0f0f0;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-icon:hover {
+            background: #e0e0e0;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+        }
+        
+        .modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-content {
+            background-color: white;
+            padding: 30px;
+            border-radius: 15px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .modal-header h2 {
+            margin: 0;
+            color: #667eea;
+        }
+        
+        .close-btn {
+            font-size: 28px;
+            font-weight: bold;
+            color: #aaa;
+            cursor: pointer;
+            border: none;
+            background: none;
+            padding: 0;
+            line-height: 1;
+        }
+        
+        .close-btn:hover {
+            color: #000;
+        }
+        
+        .modal-body {
+            margin-bottom: 20px;
+        }
+        
+        .modal-body label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .modal-body input[type="text"],
+        .modal-body textarea {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        
+        .modal-footer {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        .btn-modal {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-modal-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-modal-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+        
+        .btn-modal:hover {
+            transform: translateY(-2px);
+        }
+        
+        .prompt-list {
+            max-height: 400px;
+            overflow-y: auto;
+            margin: 20px 0;
+        }
+        
+        .prompt-item {
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+        }
+        
+        .prompt-item-content {
+            flex: 1;
+        }
+        
+        .prompt-item-name {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+        
+        .prompt-item-text {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .prompt-item-actions {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .btn-small {
+            padding: 5px 10px;
+            font-size: 12px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            background: #f0f0f0;
+        }
+        
+        .btn-small:hover {
+            background: #e0e0e0;
+        }
+        
         .video-info {
             background: #f0f7ff;
             border-left: 4px solid #667eea;
@@ -426,6 +677,18 @@ HTML_TEMPLATE = """
                 <h2>🤖 AI Analysis</h2>
                 
                 <div class="input-group">
+                    <label for="prompt-selector">Saved Prompts</label>
+                    <div class="prompt-selector">
+                        <select id="prompt-selector" onchange="loadSelectedPrompt()">
+                            <option value="">-- Select a saved prompt --</option>
+                        </select>
+                        <button class="btn-icon" onclick="openManagePromptsModal()" title="Manage Prompts">
+                            ⚙️
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="input-group">
                     <label for="ai-prompt">Prompt for OpenAI</label>
                     <textarea 
                         id="ai-prompt" 
@@ -453,6 +716,46 @@ HTML_TEMPLATE = """
                         rows="15"
                     ></textarea>
                 </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Manage Prompts Modal -->
+    <div id="manage-prompts-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Manage Prompts</h2>
+                <button class="close-btn" onclick="closeManagePromptsModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <button class="btn-modal btn-modal-primary" onclick="openCreatePromptModal()" style="width: 100%; margin-bottom: 15px;">
+                    ➕ Create New Prompt
+                </button>
+                <div id="prompt-list" class="prompt-list">
+                    <!-- Prompts will be loaded here -->
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Create/Edit Prompt Modal -->
+    <div id="prompt-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="prompt-modal-title">Create New Prompt</h2>
+                <button class="close-btn" onclick="closePromptModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="prompt-id">
+                <label for="prompt-name">Prompt Name</label>
+                <input type="text" id="prompt-name" placeholder="e.g., Summarize Key Points">
+                
+                <label for="prompt-text">Prompt Text</label>
+                <textarea id="prompt-text" rows="6" placeholder="Enter the prompt text that will be sent to OpenAI..."></textarea>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-modal btn-modal-secondary" onclick="closePromptModal()">Cancel</button>
+                <button class="btn-modal btn-modal-primary" onclick="savePrompt()">Save</button>
             </div>
         </div>
     </div>
@@ -671,6 +974,175 @@ HTML_TEMPLATE = """
             analyzeBtn.classList.remove('btn-secondary');
             analyzeBtn.classList.add('btn-ai');
         }
+        
+        // Saved Prompts Management
+        let savedPrompts = [];
+        
+        async function loadPrompts() {
+            try {
+                const response = await fetch('/api/prompts');
+                const data = await response.json();
+                if (data.success) {
+                    savedPrompts = data.prompts;
+                    updatePromptSelector();
+                }
+            } catch (error) {
+                console.error('Error loading prompts:', error);
+            }
+        }
+        
+        function updatePromptSelector() {
+            const selector = document.getElementById('prompt-selector');
+            selector.innerHTML = '<option value="">-- Select a saved prompt --</option>';
+            
+            savedPrompts.forEach(prompt => {
+                const option = document.createElement('option');
+                option.value = prompt.id;
+                option.textContent = prompt.name;
+                selector.appendChild(option);
+            });
+        }
+        
+        function loadSelectedPrompt() {
+            const selector = document.getElementById('prompt-selector');
+            const selectedId = parseInt(selector.value);
+            
+            if (!selectedId) {
+                return;
+            }
+            
+            const prompt = savedPrompts.find(p => p.id === selectedId);
+            if (prompt) {
+                document.getElementById('ai-prompt').value = prompt.prompt;
+            }
+        }
+        
+        function openManagePromptsModal() {
+            loadPromptList();
+            document.getElementById('manage-prompts-modal').classList.add('show');
+        }
+        
+        function closeManagePromptsModal() {
+            document.getElementById('manage-prompts-modal').classList.remove('show');
+        }
+        
+        function loadPromptList() {
+            const listDiv = document.getElementById('prompt-list');
+            
+            if (savedPrompts.length === 0) {
+                listDiv.innerHTML = '<p style="text-align: center; color: #999;">No saved prompts yet</p>';
+                return;
+            }
+            
+            listDiv.innerHTML = savedPrompts.map(prompt => `
+                <div class="prompt-item">
+                    <div class="prompt-item-content">
+                        <div class="prompt-item-name">${escapeHtml(prompt.name)}</div>
+                        <div class="prompt-item-text">${escapeHtml(prompt.prompt.substring(0, 100))}${prompt.prompt.length > 100 ? '...' : ''}</div>
+                    </div>
+                    <div class="prompt-item-actions">
+                        <button class="btn-small" onclick="editPrompt(${prompt.id})">✏️ Edit</button>
+                        <button class="btn-small" onclick="deletePrompt(${prompt.id})">🗑️ Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function openCreatePromptModal() {
+            document.getElementById('prompt-modal-title').textContent = 'Create New Prompt';
+            document.getElementById('prompt-id').value = '';
+            document.getElementById('prompt-name').value = '';
+            document.getElementById('prompt-text').value = '';
+            document.getElementById('prompt-modal').classList.add('show');
+        }
+        
+        function editPrompt(id) {
+            const prompt = savedPrompts.find(p => p.id === id);
+            if (!prompt) return;
+            
+            document.getElementById('prompt-modal-title').textContent = 'Edit Prompt';
+            document.getElementById('prompt-id').value = prompt.id;
+            document.getElementById('prompt-name').value = prompt.name;
+            document.getElementById('prompt-text').value = prompt.prompt;
+            document.getElementById('prompt-modal').classList.add('show');
+        }
+        
+        function closePromptModal() {
+            document.getElementById('prompt-modal').classList.remove('show');
+        }
+        
+        async function savePrompt() {
+            const id = document.getElementById('prompt-id').value;
+            const name = document.getElementById('prompt-name').value.trim();
+            const promptText = document.getElementById('prompt-text').value.trim();
+            
+            if (!name || !promptText) {
+                showMessage('Please fill in both name and prompt text', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/prompts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        id: id ? parseInt(id) : null,
+                        name: name,
+                        prompt: promptText
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage(id ? 'Prompt updated successfully!' : 'Prompt created successfully!', 'success');
+                    await loadPrompts();
+                    closePromptModal();
+                    loadPromptList();
+                } else {
+                    showMessage(data.error || 'Failed to save prompt', 'error');
+                }
+            } catch (error) {
+                showMessage('Network error: ' + error.message, 'error');
+            }
+        }
+        
+        async function deletePrompt(id) {
+            if (!confirm('Are you sure you want to delete this prompt?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/prompts/' + id, {
+                    method: 'DELETE'
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage('Prompt deleted successfully!', 'success');
+                    await loadPrompts();
+                    loadPromptList();
+                } else {
+                    showMessage(data.error || 'Failed to delete prompt', 'error');
+                }
+            } catch (error) {
+                showMessage('Network error: ' + error.message, 'error');
+            }
+        }
+        
+        // Load prompts on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadPrompts();
+        });
         
         // Allow Enter key to submit
         document.getElementById('youtube-url').addEventListener('keypress', function(e) {
@@ -891,6 +1363,102 @@ def analyze_transcript():
         return jsonify({
             'success': False,
             'error': f'Error: {str(e)}'
+        }), 500
+
+
+@app.route('/api/prompts', methods=['GET'])
+def get_prompts():
+    """Get all saved prompts"""
+    try:
+        prompts = load_prompts()
+        return jsonify({
+            'success': True,
+            'prompts': prompts
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/prompts', methods=['POST'])
+def save_prompt_api():
+    """Create or update a prompt"""
+    try:
+        data = request.get_json()
+        prompt_id = data.get('id')
+        name = data.get('name', '').strip()
+        prompt_text = data.get('prompt', '').strip()
+        
+        if not name or not prompt_text:
+            return jsonify({
+                'success': False,
+                'error': 'Name and prompt text are required'
+            }), 400
+        
+        prompts = load_prompts()
+        
+        if prompt_id:
+            # Update existing prompt
+            prompt = next((p for p in prompts if p['id'] == prompt_id), None)
+            if prompt:
+                prompt['name'] = name
+                prompt['prompt'] = prompt_text
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Prompt not found'
+                }), 404
+        else:
+            # Create new prompt
+            new_id = get_next_prompt_id(prompts)
+            prompts.append({
+                'id': new_id,
+                'name': name,
+                'prompt': prompt_text
+            })
+        
+        if save_prompts(prompts):
+            return jsonify({
+                'success': True,
+                'prompts': prompts
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to save prompts'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@app.route('/api/prompts/<int:prompt_id>', methods=['DELETE'])
+def delete_prompt_api(prompt_id):
+    """Delete a prompt"""
+    try:
+        prompts = load_prompts()
+        prompts = [p for p in prompts if p['id'] != prompt_id]
+        
+        if save_prompts(prompts):
+            return jsonify({
+                'success': True,
+                'prompts': prompts
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to save prompts'
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
         }), 500
 
 
