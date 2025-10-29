@@ -1,0 +1,27 @@
+# Secrets and credentials
+.env
+*.key
+*.pem
+secrets/
+*secret*
+
+# Local configuration
+local_config.py
+config.local.py
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.venv/
+
+# Backup files
+*.backup
+*.old
+*.bak
+
+# OS files
+.DS_Store
+Thumbs.db
