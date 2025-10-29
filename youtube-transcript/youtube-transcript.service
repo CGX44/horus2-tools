@@ -1,0 +1,15 @@
+[Unit]
+Description=YouTube Transcript Downloader Web Service
+After=network.target
+
+[Service]
+Type=simple
+User=chris
+WorkingDirectory=/opt/youtube-transcript
+Environment="PATH=/opt/youtube-transcript/venv/bin"
+ExecStart=/opt/youtube-transcript/venv/bin/python youtube_transcript_app.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
