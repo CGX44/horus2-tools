@@ -37,3 +37,24 @@ Access at: http://192.168.44.11:8000
 POST /api/transcript
 - Input: `{"url": "https://youtube.com/watch?v=..."}`
 - Output: `{"success": true, "transcript": "...", "title": "...", "channel": "..."}`
+
+## Configuration
+
+### Setting up OpenAI API Key
+
+1. Get your API key from https://platform.openai.com/api-keys
+2. Edit the systemd service file:
+```bash
+   sudo nano /etc/systemd/system/youtube-transcript.service
+```
+3. Update the Environment line with your actual key:
+```ini
+   Environment="OPENAI_API_KEY=sk-your-actual-key-here"
+```
+4. Reload and restart:
+```bash
+   sudo systemctl daemon-reload
+   sudo systemctl restart youtube-transcript
+```
+
+**Important:** Never commit your actual API key to the repository!
